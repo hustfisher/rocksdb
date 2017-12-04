@@ -1,10 +1,12 @@
 import os
+import glob
 import os.path
 import shutil
 import subprocess
 import time
 import unittest
 import tempfile
+import re
 
 def my_check_output(*popenargs, **kwargs):
     """
@@ -43,19 +45,26 @@ class LDBTestCase(unittest.TestCase):
     def dbParam(self, dbName):
         return "--db=%s" % os.path.join(self.TMP_DIR, dbName)
 
-    def assertRunOKFull(self, params, expectedOutput, unexpected=False):
+    def assertRunOKFull(self, params, expectedOutput, unexpected=False,
+                        isPattern=False):
         """
         All command-line params must be specified.
         Allows full flexibility in testing; for example: missing db param.
 
         """
-
         output = my_check_output("./ldb %s |grep -v \"Created bg thread\"" %
                             params, shell=True)
         if not unexpected:
-            self.assertEqual(output.strip(), expectedOutput.strip())
+            if isPattern:
+                self.assertNotEqual(expectedOutput.search(output.strip()),
+                                    None)
+            else:
+                self.assertEqual(output.strip(), expectedOutput.strip())
         else:
-            self.assertNotEqual(output.strip(), expectedOutput.strip())
+            if isPattern:
+                self.assertEqual(expectedOutput.search(output.strip()), None)
+            else:
+                self.assertNotEqual(output.strip(), expectedOutput.strip())
 
     def assertRunFAILFull(self, params):
         """
@@ -129,6 +138,8 @@ class LDBTestCase(unittest.TestCase):
         # It is weird that GET and SCAN raise exception for
         # non-existent key, while delete does not
 
+        self.assertRunOK("checkconsistency", "OK")
+
     def dumpDb(self, params, dumpFile):
         return 0 == run_err_null("./ldb dump %s > %s" % (params, dumpFile))
 
@@ -158,10 +169,10 @@ class LDBTestCase(unittest.TestCase):
         print "Running testCountDelimIDump..."
         self.assertRunOK("batchput x.1 x1 --create_if_missing", "OK")
         self.assertRunOK("batchput y.abc abc y.2 2 z.13c pqr", "OK")
-        self.assertRunOK("dump --count_delim", "x => count:1\tsize:5\ny => count:2\tsize:12\nz => count:1\tsize:8")
-        self.assertRunOK("dump --count_delim=\".\"", "x => count:1\tsize:5\ny => count:2\tsize:12\nz => count:1\tsize:8")
+        self.assertRunOK("idump --count_delim", "x => count:1\tsize:5\ny => count:2\tsize:12\nz => count:1\tsize:8")
+        self.assertRunOK("idump --count_delim=\".\"", "x => count:1\tsize:5\ny => count:2\tsize:12\nz => count:1\tsize:8")
         self.assertRunOK("batchput x,2 x2 x,abc xabc", "OK")
-        self.assertRunOK("dump --count_delim=\",\"", "x => count:2\tsize:14\nx.1 => count:1\tsize:5\ny.2 => count:1\tsize:4\ny.abc => count:1\tsize:8\nz.13c => count:1\tsize:8")
+        self.assertRunOK("idump --count_delim=\",\"", "x => count:2\tsize:14\nx.1 => count:1\tsize:5\ny.2 => count:1\tsize:4\ny.abc => count:1\tsize:8\nz.13c => count:1\tsize:8")
 
     def testInvalidCmdLines(self):
         print "Running testInvalidCmdLines..."
@@ -201,18 +212,22 @@ class LDBTestCase(unittest.TestCase):
         self.assertRunOK("scan", "a1 : b1\na2 : b2\na3 : b3\na4 : b4")
         self.assertRunOK("delete --hex 0x6133", "OK")
         self.assertRunOK("scan", "a1 : b1\na2 : b2\na4 : b4")
+        self.assertRunOK("checkconsistency", "OK")
 
     def testTtlPutGet(self):
         print "Running testTtlPutGet..."
         self.assertRunOK("put a1 b1 --ttl --create_if_missing", "OK")
-        self.assertRunOK("scan ", "a1 : b1", True)
+        self.assertRunOK("scan --hex", "0x6131 : 0x6231", True)
         self.assertRunOK("dump --ttl ", "a1 ==> b1", True)
+        self.assertRunOK("dump --hex --ttl ",
+                         "0x6131 ==> 0x6231\nKeys in range: 1")
         self.assertRunOK("scan --hex --ttl", "0x6131 : 0x6231")
-        self.assertRunOK("get a1", "b1", True)
+        self.assertRunOK("get --value_hex a1", "0x6231", True)
         self.assertRunOK("get --ttl a1", "b1")
         self.assertRunOK("put a3 b3 --create_if_missing", "OK")
         # fails because timstamp's length is greater than value's
         self.assertRunFAIL("get --ttl a3")
+        self.assertRunOK("checkconsistency", "OK")
 
     def testInvalidCmdLines(self):
         print "Running testInvalidCmdLines..."
@@ -286,8 +301,8 @@ class LDBTestCase(unittest.TestCase):
                 "x1 : y1\nx2 : y2\nx3 : y3\nx4 : y4")
 
         # Dump and load with lots of extra params specified
-        extraParams = " ".join(["--bloom_bits=14", "--compression_type=bzip2",
-                                "--block_size=1024", "--auto_compaction=true",
+        extraParams = " ".join(["--bloom_bits=14", "--block_size=1024",
+                                "--auto_compaction=true",
                                 "--write_buffer_size=4194304",
                                 "--file_size=2097152"])
         dumpFilePath = os.path.join(self.TMP_DIR, "dump6")
@@ -315,6 +330,18 @@ class LDBTestCase(unittest.TestCase):
         dumpFilePath = os.path.join(self.TMP_DIR, "dump8")
         self.assertFalse(self.dumpDb(
             "--db=%s --create_if_missing" % origDbPath, dumpFilePath))
+
+    def testIDumpBasics(self):
+        print "Running testIDumpBasics..."
+        self.assertRunOK("put a val --create_if_missing", "OK")
+        self.assertRunOK("put b val", "OK")
+        self.assertRunOK(
+                "idump", "'a' seq:1, type:1 => val\n"
+                "'b' seq:2, type:1 => val\nInternal keys in range: 2")
+        self.assertRunOK(
+                "idump --input_key_hex --from=%s --to=%s" % (hex(ord('a')),
+                                                             hex(ord('b'))),
+                "'a' seq:1, type:1 => val\nInternal keys in range: 1")
 
     def testMiscAdminTask(self):
         print "Running testMiscAdminTask..."
@@ -351,6 +378,174 @@ class LDBTestCase(unittest.TestCase):
             "./ldb dump_wal --db=%s --walfile=%s --header" % (
                 origDbPath, os.path.join(origDbPath, "LOG"))))
         self.assertRunOK("scan", "x1 : y1\nx2 : y2\nx3 : y3\nx4 : y4")
+
+    def testCheckConsistency(self):
+        print "Running testCheckConsistency..."
+
+        dbPath = os.path.join(self.TMP_DIR, self.DB_NAME)
+        self.assertRunOK("put x1 y1 --create_if_missing", "OK")
+        self.assertRunOK("put x2 y2", "OK")
+        self.assertRunOK("get x1", "y1")
+        self.assertRunOK("checkconsistency", "OK")
+
+        sstFilePath = my_check_output("ls %s" % os.path.join(dbPath, "*.sst"),
+                                      shell=True)
+
+        # Modify the file
+        my_check_output("echo 'evil' > %s" % sstFilePath, shell=True)
+        self.assertRunFAIL("checkconsistency")
+
+        # Delete the file
+        my_check_output("rm -f %s" % sstFilePath, shell=True)
+        self.assertRunFAIL("checkconsistency")
+
+    def dumpLiveFiles(self, params, dumpFile):
+        return 0 == run_err_null("./ldb dump_live_files %s > %s" % (
+            params, dumpFile))
+
+    def testDumpLiveFiles(self):
+        print "Running testDumpLiveFiles..."
+
+        dbPath = os.path.join(self.TMP_DIR, self.DB_NAME)
+        self.assertRunOK("put x1 y1 --create_if_missing", "OK")
+        self.assertRunOK("put x2 y2", "OK")
+        dumpFilePath = os.path.join(self.TMP_DIR, "dump1")
+        self.assertTrue(self.dumpLiveFiles("--db=%s" % dbPath, dumpFilePath))
+        self.assertRunOK("delete x1", "OK")
+        self.assertRunOK("put x3 y3", "OK")
+        dumpFilePath = os.path.join(self.TMP_DIR, "dump2")
+        self.assertTrue(self.dumpLiveFiles("--db=%s" % dbPath, dumpFilePath))
+
+    def getManifests(self, directory):
+        return glob.glob(directory + "/MANIFEST-*")
+
+    def getSSTFiles(self, directory):
+        return glob.glob(directory + "/*.sst")
+
+    def getWALFiles(self, directory):
+        return glob.glob(directory + "/*.log")
+
+    def copyManifests(self, src, dest):
+        return 0 == run_err_null("cp " + src + " " + dest)
+
+    def testManifestDump(self):
+        print "Running testManifestDump..."
+        dbPath = os.path.join(self.TMP_DIR, self.DB_NAME)
+        self.assertRunOK("put 1 1 --create_if_missing", "OK")
+        self.assertRunOK("put 2 2", "OK")
+        self.assertRunOK("put 3 3", "OK")
+        # Pattern to expect from manifest_dump.
+        num = "[0-9]+"
+        st = ".*"
+        subpat = st + " seq:" + num + ", type:" + num
+        regex = num + ":" + num + "\[" + subpat + ".." + subpat + "\]"
+        expected_pattern = re.compile(regex)
+        cmd = "manifest_dump --db=%s"
+        manifest_files = self.getManifests(dbPath)
+        self.assertTrue(len(manifest_files) == 1)
+        # Test with the default manifest file in dbPath.
+        self.assertRunOKFull(cmd % dbPath, expected_pattern,
+                             unexpected=False, isPattern=True)
+        self.copyManifests(manifest_files[0], manifest_files[0] + "1")
+        manifest_files = self.getManifests(dbPath)
+        self.assertTrue(len(manifest_files) == 2)
+        # Test with multiple manifest files in dbPath.
+        self.assertRunFAILFull(cmd % dbPath)
+        # Running it with the copy we just created should pass.
+        self.assertRunOKFull((cmd + " --path=%s")
+                             % (dbPath, manifest_files[1]),
+                             expected_pattern, unexpected=False,
+                             isPattern=True)
+        # Make sure that using the dump with --path will result in identical
+        # output as just using manifest_dump.
+        cmd = "dump --path=%s"
+        self.assertRunOKFull((cmd)
+                             % (manifest_files[1]),
+                             expected_pattern, unexpected=False,
+                             isPattern=True)
+
+    def testSSTDump(self):
+        print "Running testSSTDump..."
+
+        dbPath = os.path.join(self.TMP_DIR, self.DB_NAME)
+        self.assertRunOK("put sst1 sst1_val --create_if_missing", "OK")
+        self.assertRunOK("put sst2 sst2_val", "OK")
+        self.assertRunOK("get sst1", "sst1_val")
+
+        # Pattern to expect from SST dump.
+        regex = ".*Sst file format:.*"
+        expected_pattern = re.compile(regex)
+
+        sst_files = self.getSSTFiles(dbPath)
+        self.assertTrue(len(sst_files) >= 1)
+        cmd = "dump --path=%s"
+        self.assertRunOKFull((cmd)
+                             % (sst_files[0]),
+                             expected_pattern, unexpected=False,
+                             isPattern=True)
+
+    def testWALDump(self):
+        print "Running testWALDump..."
+
+        dbPath = os.path.join(self.TMP_DIR, self.DB_NAME)
+        self.assertRunOK("put wal1 wal1_val --create_if_missing", "OK")
+        self.assertRunOK("put wal2 wal2_val", "OK")
+        self.assertRunOK("get wal1", "wal1_val")
+
+        # Pattern to expect from WAL dump.
+        regex = "^Sequence,Count,ByteSize,Physical Offset,Key\(s\).*"
+        expected_pattern = re.compile(regex)
+
+        wal_files = self.getWALFiles(dbPath)
+        self.assertTrue(len(wal_files) >= 1)
+        cmd = "dump --path=%s"
+        self.assertRunOKFull((cmd)
+                             % (wal_files[0]),
+                             expected_pattern, unexpected=False,
+                             isPattern=True)
+
+    def testListColumnFamilies(self):
+        print "Running testListColumnFamilies..."
+        dbPath = os.path.join(self.TMP_DIR, self.DB_NAME)
+        self.assertRunOK("put x1 y1 --create_if_missing", "OK")
+        cmd = "list_column_families %s | grep -v \"Column families\""
+        # Test on valid dbPath.
+        self.assertRunOKFull(cmd % dbPath, "{default}")
+        # Test on empty path.
+        self.assertRunFAILFull(cmd % "")
+
+    def testColumnFamilies(self):
+        print "Running testColumnFamilies..."
+        dbPath = os.path.join(self.TMP_DIR, self.DB_NAME)
+        self.assertRunOK("put cf1_1 1 --create_if_missing", "OK")
+        self.assertRunOK("put cf1_2 2 --create_if_missing", "OK")
+        self.assertRunOK("put cf1_3 3 --try_load_options", "OK")
+        # Given non-default column family to single CF DB.
+        self.assertRunFAIL("get cf1_1 --column_family=two")
+        self.assertRunOK("create_column_family two", "OK")
+        self.assertRunOK("put cf2_1 1 --create_if_missing --column_family=two",
+                         "OK")
+        self.assertRunOK("put cf2_2 2 --create_if_missing --column_family=two",
+                         "OK")
+        self.assertRunOK("delete cf1_2", "OK")
+        self.assertRunOK("create_column_family three", "OK")
+        self.assertRunOK("delete cf2_2 --column_family=two", "OK")
+        self.assertRunOK(
+            "put cf3_1 3 --create_if_missing --column_family=three",
+            "OK")
+        self.assertRunOK("get cf1_1 --column_family=default", "1")
+        self.assertRunOK("dump --column_family=two",
+                         "cf2_1 ==> 1\nKeys in range: 1")
+        self.assertRunOK("dump --column_family=two --try_load_options",
+                         "cf2_1 ==> 1\nKeys in range: 1")
+        self.assertRunOK("dump",
+                         "cf1_1 ==> 1\ncf1_3 ==> 3\nKeys in range: 2")
+        self.assertRunOK("get cf2_1 --column_family=two",
+                         "1")
+        self.assertRunOK("get cf3_1 --column_family=three",
+                         "3")
+        # non-existing column family.
+        self.assertRunFAIL("get cf3_1 --column_family=four")
 
 if __name__ == "__main__":
     unittest.main()

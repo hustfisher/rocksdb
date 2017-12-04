@@ -1,3 +1,7 @@
+//  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 /**
  * A test harness for the Redis API built on rocksdb.
  *
@@ -9,9 +13,9 @@
  * TODO:  Add LARGE random test cases to verify efficiency and scalability
  *
  * @author Deon Nicholas (dnicholas@fb.com)
- * Copyright 2013 Facebook
  */
 
+#ifndef ROCKSDB_LITE
 
 #include <iostream>
 #include <cctype>
@@ -21,13 +25,12 @@
 #include "util/random.h"
 
 using namespace rocksdb;
-using namespace std;
 
 namespace rocksdb {
 
-class RedisListsTest {
+class RedisListsTest : public testing::Test {
  public:
-  static const string kDefaultDbName;
+  static const std::string kDefaultDbName;
   static Options options;
 
   RedisListsTest() {
@@ -35,12 +38,14 @@ class RedisListsTest {
   }
 };
 
-const string RedisListsTest::kDefaultDbName = "/tmp/redisdefaultdb/";
+const std::string RedisListsTest::kDefaultDbName =
+    test::TmpDir() + "/redis_lists_test";
 Options RedisListsTest::options = Options();
 
 // operator== and operator<< are defined below for vectors (lists)
 // Needed for ASSERT_EQ
 
+namespace {
 void AssertListEq(const std::vector<std::string>& result,
                   const std::vector<std::string>& expected_result) {
   ASSERT_EQ(result.size(), expected_result.size());
@@ -48,12 +53,13 @@ void AssertListEq(const std::vector<std::string>& result,
     ASSERT_EQ(result[i], expected_result[i]);
   }
 }
+}  // namespace
 
 // PushRight, Length, Index, Range
-TEST(RedisListsTest, SimpleTest) {
+TEST_F(RedisListsTest, SimpleTest) {
   RedisLists redis(kDefaultDbName, options, true);   // Destructive
 
-  string tempv; // Used below for all Index(), PopRight(), PopLeft()
+  std::string tempv;  // Used below for all Index(), PopRight(), PopLeft()
 
   // Simple PushRight (should return the new length each time)
   ASSERT_EQ(redis.PushRight("k1", "v1"), 1);
@@ -79,10 +85,10 @@ TEST(RedisListsTest, SimpleTest) {
 }
 
 // PushLeft, Length, Index, Range
-TEST(RedisListsTest, SimpleTest2) {
+TEST_F(RedisListsTest, SimpleTest2) {
   RedisLists redis(kDefaultDbName, options, true);   // Destructive
 
-  string tempv; // Used below for all Index(), PopRight(), PopLeft()
+  std::string tempv;  // Used below for all Index(), PopRight(), PopLeft()
 
   // Simple PushRight
   ASSERT_EQ(redis.PushLeft("k1", "v3"), 1);
@@ -108,10 +114,10 @@ TEST(RedisListsTest, SimpleTest2) {
 }
 
 // Exhaustive test of the Index() function
-TEST(RedisListsTest, IndexTest) {
+TEST_F(RedisListsTest, IndexTest) {
   RedisLists redis(kDefaultDbName, options, true);   // Destructive
 
-  string tempv; // Used below for all Index(), PopRight(), PopLeft()
+  std::string tempv;  // Used below for all Index(), PopRight(), PopLeft()
 
   // Empty Index check (return empty and should not crash or edit tempv)
   tempv = "yo";
@@ -167,10 +173,10 @@ TEST(RedisListsTest, IndexTest) {
 
 
 // Exhaustive test of the Range() function
-TEST(RedisListsTest, RangeTest) {
+TEST_F(RedisListsTest, RangeTest) {
   RedisLists redis(kDefaultDbName, options, true);   // Destructive
 
-  string tempv; // Used below for all Index(), PopRight(), PopLeft()
+  std::string tempv;  // Used below for all Index(), PopRight(), PopLeft()
 
   // Simple Pushes (will yield: [v6, v4, v4, v1, v2, v3])
   redis.PushRight("k1", "v1");
@@ -250,10 +256,10 @@ TEST(RedisListsTest, RangeTest) {
 }
 
 // Exhaustive test for InsertBefore(), and InsertAfter()
-TEST(RedisListsTest, InsertTest) {
+TEST_F(RedisListsTest, InsertTest) {
   RedisLists redis(kDefaultDbName, options, true);
 
-  string tempv; // Used below for all Index(), PopRight(), PopLeft()
+  std::string tempv;  // Used below for all Index(), PopRight(), PopLeft()
 
   // Insert on empty list (return 0, and do not crash)
   ASSERT_EQ(redis.InsertBefore("k1", "non-exist", "a"), 0);
@@ -334,10 +340,10 @@ TEST(RedisListsTest, InsertTest) {
 }
 
 // Exhaustive test of Set function
-TEST(RedisListsTest, SetTest) {
+TEST_F(RedisListsTest, SetTest) {
   RedisLists redis(kDefaultDbName, options, true);
 
-  string tempv; // Used below for all Index(), PopRight(), PopLeft()
+  std::string tempv;  // Used below for all Index(), PopRight(), PopLeft()
 
   // Set on empty list (return false, and do not crash)
   ASSERT_EQ(redis.Set("k1", 7, "a"), false);
@@ -430,10 +436,10 @@ TEST(RedisListsTest, SetTest) {
 }
 
 // Testing Insert, Push, and Set, in a mixed environment
-TEST(RedisListsTest, InsertPushSetTest) {
+TEST_F(RedisListsTest, InsertPushSetTest) {
   RedisLists redis(kDefaultDbName, options, true);   // Destructive
 
-  string tempv; // Used below for all Index(), PopRight(), PopLeft()
+  std::string tempv;  // Used below for all Index(), PopRight(), PopLeft()
 
   // A series of pushes and insertions
   // Will result in [newbegin, z, a, aftera, x, newend]
@@ -522,10 +528,10 @@ TEST(RedisListsTest, InsertPushSetTest) {
 }
 
 // Testing Trim, Pop
-TEST(RedisListsTest, TrimPopTest) {
+TEST_F(RedisListsTest, TrimPopTest) {
   RedisLists redis(kDefaultDbName, options, true);   // Destructive
 
-  string tempv; // Used below for all Index(), PopRight(), PopLeft()
+  std::string tempv;  // Used below for all Index(), PopRight(), PopLeft()
 
   // A series of pushes and insertions
   // Will result in [newbegin, z, a, aftera, x, newend]
@@ -592,10 +598,10 @@ TEST(RedisListsTest, TrimPopTest) {
 }
 
 // Testing Remove, RemoveFirst, RemoveLast
-TEST(RedisListsTest, RemoveTest) {
+TEST_F(RedisListsTest, RemoveTest) {
   RedisLists redis(kDefaultDbName, options, true);   // Destructive
 
-  string tempv; // Used below for all Index(), PopRight(), PopLeft()
+  std::string tempv;  // Used below for all Index(), PopRight(), PopLeft()
 
   // A series of pushes and insertions
   // Will result in [newbegin, z, a, aftera, x, newend, a, a]
@@ -683,9 +689,8 @@ TEST(RedisListsTest, RemoveTest) {
 
 
 // Test Multiple keys and Persistence
-TEST(RedisListsTest, PersistenceMultiKeyTest) {
-
-  string tempv; // Used below for all Index(), PopRight(), PopLeft()
+TEST_F(RedisListsTest, PersistenceMultiKeyTest) {
+  std::string tempv;  // Used below for all Index(), PopRight(), PopLeft()
 
   // Block one: populate a single key in the database
   {
@@ -738,10 +743,11 @@ TEST(RedisListsTest, PersistenceMultiKeyTest) {
 /// THE manual REDIS TEST begins here
 /// THIS WILL ONLY OCCUR IF YOU RUN: ./redis_test -m
 
+namespace {
 void MakeUpper(std::string* const s) {
-  int len = s->length();
-  for(int i=0; i<len; ++i) {
-    (*s)[i] = toupper((*s)[i]); // C-version defined in <ctype.h>
+  int len = static_cast<int>(s->length());
+  for (int i = 0; i < len; ++i) {
+    (*s)[i] = static_cast<char>(toupper((*s)[i]));  // C-version defined in <ctype.h>
   }
 }
 
@@ -761,12 +767,12 @@ int manual_redis_test(bool destructive){
 
   std::string command;
   while(true) {
-    cin >> command;
+    std::cin >> command;
     MakeUpper(&command);
 
     if (command == "LINSERT") {
       std::string k, t, p, v;
-      cin >> k >> t >> p >> v;
+      std::cin >> k >> t >> p >> v;
       MakeUpper(&t);
       if (t=="BEFORE") {
         std::cout << redis.InsertBefore(k, p, v) << std::endl;
@@ -784,13 +790,13 @@ int manual_redis_test(bool destructive){
     } else if (command == "LPOP") {
       std::string k;
       std::cin >> k;
-      string res;
+      std::string res;
       redis.PopLeft(k, &res);
       std::cout << res << std::endl;
     } else if (command == "RPOP") {
       std::string k;
       std::cin >> k;
-      string res;
+      std::string res;
       redis.PopRight(k, &res);
       std::cout << res << std::endl;
     } else if (command == "LREM") {
@@ -822,18 +828,18 @@ int manual_redis_test(bool destructive){
       std::string k;
       int idx;
       std::string v;
-      cin >> k >> idx >> v;
+      std::cin >> k >> idx >> v;
       redis.Set(k, idx, v);
     } else if (command == "LINDEX") {
       std::string k;
       int idx;
       std::cin >> k >> idx;
-      string res;
+      std::string res;
       redis.Index(k, idx, &res);
       std::cout << res << std::endl;
     } else if (command == "PRINT") {      // Added by Deon
       std::string k;
-      cin >> k;
+      std::cin >> k;
       redis.Print(k);
     } else if (command == "QUIT") {
       return 0;
@@ -842,6 +848,7 @@ int manual_redis_test(bool destructive){
     }
   }
 }
+}  // namespace
 
 } // namespace rocksdb
 
@@ -851,6 +858,7 @@ int manual_redis_test(bool destructive){
 //        "./redis_test -m -d" for destructive manual test (erase db before use)
 
 
+namespace {
 // Check for "want" argument in the argument list
 bool found_arg(int argc, char* argv[], const char* want){
   for(int i=1; i<argc; ++i){
@@ -860,16 +868,27 @@ bool found_arg(int argc, char* argv[], const char* want){
   }
   return false;
 }
+}  // namespace
 
 // Will run unit tests.
 // However, if -m is specified, it will do user manual/interactive testing
 // -m -d is manual and destructive (will clear the database before use)
 int main(int argc, char* argv[]) {
+  ::testing::InitGoogleTest(&argc, argv);
   if (found_arg(argc, argv, "-m")) {
     bool destructive = found_arg(argc, argv, "-d");
     return rocksdb::manual_redis_test(destructive);
   } else {
-    return rocksdb::test::RunAllTests();
+    return RUN_ALL_TESTS();
   }
 }
 
+#else
+#include <stdio.h>
+
+int main(int argc, char* argv[]) {
+  fprintf(stderr, "SKIPPED as redis is not supported in ROCKSDB_LITE\n");
+  return 0;
+}
+
+#endif  // !ROCKSDB_LITE

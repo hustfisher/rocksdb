@@ -1,44 +1,55 @@
-//  Copyright (c) 2013, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 #pragma once
+#include "monitoring/statistics.h"
 #include "rocksdb/env.h"
-#include "util/statistics_imp.h"
 
 namespace rocksdb {
 // Auto-scoped.
-// Records the statistic into the corresponding histogram.
+// Records the measure time into the corresponding histogram if statistics
+// is not nullptr. It is also saved into *elapsed if the pointer is not nullptr
+// and overwrite is true, it will be added to *elapsed if overwrite is false.
 class StopWatch {
  public:
-  explicit StopWatch(
-    Env * const env,
-    Statistics* statistics = nullptr,
-    const Histograms histogram_name = DB_GET) :
-      env_(env),
-      start_time_(env->NowMicros()),
-      statistics_(statistics),
-      histogram_name_(histogram_name) {}
-
-
-
-  uint64_t ElapsedMicros() {
-    return env_->NowMicros() - start_time_;
-  }
+  StopWatch(Env* const env, Statistics* statistics, const uint32_t hist_type,
+            uint64_t* elapsed = nullptr, bool overwrite = true)
+      : env_(env),
+        statistics_(statistics),
+        hist_type_(hist_type),
+        elapsed_(elapsed),
+        overwrite_(overwrite),
+        stats_enabled_(statistics && statistics->HistEnabledForType(hist_type)),
+        start_time_((stats_enabled_ || elapsed != nullptr) ? env->NowMicros()
+                                                           : 0) {}
 
   ~StopWatch() {
-    if (statistics_) {
-      statistics_->measureTime(histogram_name_, ElapsedMicros());
+    if (elapsed_) {
+      if (overwrite_) {
+        *elapsed_ = env_->NowMicros() - start_time_;
+      } else {
+        *elapsed_ += env_->NowMicros() - start_time_;
+      }
+    }
+    if (stats_enabled_) {
+      statistics_->measureTime(hist_type_,
+          (elapsed_ != nullptr) ? *elapsed_ :
+                                  (env_->NowMicros() - start_time_));
     }
   }
 
+  uint64_t start_time() const { return start_time_; }
+
  private:
   Env* const env_;
-  const uint64_t start_time_;
   Statistics* statistics_;
-  const Histograms histogram_name_;
-
+  const uint32_t hist_type_;
+  uint64_t* elapsed_;
+  bool overwrite_;
+  bool stats_enabled_;
+  const uint64_t start_time_;
 };
 
 // a nano second precision stopwatch
@@ -60,6 +71,10 @@ class StopWatchNano {
       start_ = now;
     }
     return elapsed;
+  }
+
+  uint64_t ElapsedNanosSafe(bool reset = false) {
+    return (env_ != nullptr) ? ElapsedNanos(reset) : 0U;
   }
 
  private:

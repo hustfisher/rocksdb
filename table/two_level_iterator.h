@@ -1,7 +1,7 @@
-//  Copyright (c) 2013, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -10,10 +10,27 @@
 #pragma once
 #include "rocksdb/iterator.h"
 #include "rocksdb/env.h"
+#include "table/iterator_wrapper.h"
 
 namespace rocksdb {
 
 struct ReadOptions;
+class InternalKeyComparator;
+class Arena;
+
+struct TwoLevelIteratorState {
+  explicit TwoLevelIteratorState(bool _check_prefix_may_match)
+      : check_prefix_may_match(_check_prefix_may_match) {}
+
+  virtual ~TwoLevelIteratorState() {}
+  virtual InternalIterator* NewSecondaryIterator(const Slice& handle) = 0;
+  virtual bool PrefixMayMatch(const Slice& internal_key) = 0;
+  virtual bool KeyReachedUpperBound(const Slice& internal_key) = 0;
+
+  // If call PrefixMayMatch()
+  bool check_prefix_may_match;
+};
+
 
 // Return a new two level iterator.  A two-level iterator contains an
 // index iterator whose values point to a sequence of blocks where
@@ -24,17 +41,13 @@ struct ReadOptions;
 //
 // Uses a supplied function to convert an index_iter value into
 // an iterator over the contents of the corresponding block.
-extern Iterator* NewTwoLevelIterator(
-    Iterator* index_iter,
-    Iterator* (*block_function)(
-        void* arg,
-        const ReadOptions& options,
-        const EnvOptions& soptions,
-        const Slice& index_value,
-        bool for_compaction),
-    void* arg,
-    const ReadOptions& options,
-    const EnvOptions& soptions,
-    bool for_compaction = false);
+// arena: If not null, the arena is used to allocate the Iterator.
+//        When destroying the iterator, the destructor will destroy
+//        all the states but those allocated in arena.
+// need_free_iter_and_state: free `state` and `first_level_iter` if
+//                           true. Otherwise, just call destructor.
+extern InternalIterator* NewTwoLevelIterator(
+    TwoLevelIteratorState* state, InternalIterator* first_level_iter,
+    Arena* arena = nullptr, bool need_free_iter_and_state = true);
 
 }  // namespace rocksdb

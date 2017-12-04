@@ -1,25 +1,22 @@
-//  Copyright (c) 2013, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 
 #pragma once
 #include <algorithm>
 #include <stdio.h>
-#include <sys/time.h>
 #include <time.h>
 #include <iostream>
+#include "port/sys_time.h"
 #include "rocksdb/env.h"
 #include "rocksdb/status.h"
 
 #ifdef USE_HDFS
-#include "hdfs/hdfs.h"
+#include <hdfs.h>
 
 namespace rocksdb {
-
-static const std::string kProto = "hdfs://";
-static const std::string pathsep = "/";
 
 // Thrown during execution when there is an issue with the supplied
 // arguments.
@@ -47,7 +44,7 @@ private:
 class HdfsEnv : public Env {
 
  public:
-  HdfsEnv(const std::string& fsname) : fsname_(fsname) {
+  explicit HdfsEnv(const std::string& fsname) : fsname_(fsname) {
     posixEnv = Env::Default();
     fileSys_ = connectToPath(fsname_);
   }
@@ -58,19 +55,21 @@ class HdfsEnv : public Env {
   }
 
   virtual Status NewSequentialFile(const std::string& fname,
-                                   SequentialFile** result);
+                                   std::unique_ptr<SequentialFile>* result,
+                                   const EnvOptions& options);
 
   virtual Status NewRandomAccessFile(const std::string& fname,
-                                     RandomAccessFile** result);
+                                     std::unique_ptr<RandomAccessFile>* result,
+                                     const EnvOptions& options);
 
   virtual Status NewWritableFile(const std::string& fname,
-                                 WritableFile** result);
-
-  virtual Status NewRandomRWFile(const std::string& fname,
-                                 unique_ptr<RandomRWFile>* result,
+                                 std::unique_ptr<WritableFile>* result,
                                  const EnvOptions& options);
 
-  virtual bool FileExists(const std::string& fname);
+  virtual Status NewDirectory(const std::string& name,
+                              std::unique_ptr<Directory>* result);
+
+  virtual Status FileExists(const std::string& fname);
 
   virtual Status GetChildren(const std::string& path,
                              std::vector<std::string>* result);
@@ -90,19 +89,35 @@ class HdfsEnv : public Env {
 
   virtual Status RenameFile(const std::string& src, const std::string& target);
 
+  virtual Status LinkFile(const std::string& src, const std::string& target) {
+    return Status::NotSupported(); // not supported
+  }
+
   virtual Status LockFile(const std::string& fname, FileLock** lock);
 
   virtual Status UnlockFile(FileLock* lock);
 
-  virtual Status NewLogger(const std::string& fname, Logger** result);
+  virtual Status NewLogger(const std::string& fname,
+                           std::shared_ptr<Logger>* result);
 
   virtual void Schedule(void (*function)(void* arg), void* arg,
-                        Priority pri = LOW) {
-    posixEnv->Schedule(function, arg, pri);
+                        Priority pri = LOW, void* tag = nullptr, void (*unschedFunction)(void* arg) = 0) {
+    posixEnv->Schedule(function, arg, pri, tag, unschedFunction);
+  }
+
+  virtual int UnSchedule(void* tag, Priority pri) {
+    return posixEnv->UnSchedule(tag, pri);
   }
 
   virtual void StartThread(void (*function)(void* arg), void* arg) {
     posixEnv->StartThread(function, arg);
+  }
+
+  virtual void WaitForJoin() { posixEnv->WaitForJoin(); }
+
+  virtual unsigned int GetThreadPoolQueueLen(Priority pri = LOW) const
+      override {
+    return posixEnv->GetThreadPoolQueueLen(pri);
   }
 
   virtual Status GetTestDirectory(std::string* path) {
@@ -134,6 +149,14 @@ class HdfsEnv : public Env {
     posixEnv->SetBackgroundThreads(number, pri);
   }
 
+  virtual int GetBackgroundThreads(Priority pri = LOW) {
+    return posixEnv->GetBackgroundThreads(pri);
+  }
+
+  virtual void IncBackgroundThreadsIfNeeded(int number, Priority pri) override {
+    posixEnv->IncBackgroundThreadsIfNeeded(number, pri);
+  }
+
   virtual std::string TimeToString(uint64_t number) {
     return posixEnv->TimeToString(number);
   }
@@ -141,6 +164,10 @@ class HdfsEnv : public Env {
   static uint64_t gettid() {
     assert(sizeof(pthread_t) <= sizeof(uint64_t));
     return (uint64_t)pthread_self();
+  }
+
+  virtual uint64_t GetThreadID() const override {
+    return HdfsEnv::gettid();
   }
 
  private:
@@ -151,6 +178,9 @@ class HdfsEnv : public Env {
                         // object here so that we can use posix timers,
                         // posix threads, etc.
 
+  static const std::string kProto;
+  static const std::string pathsep;
+
   /**
    * If the URI is specified of the form hdfs://server:port/path,
    * then connect to the specified cluster
@@ -158,7 +188,7 @@ class HdfsEnv : public Env {
    */
   hdfsFS connectToPath(const std::string& uri) {
     if (uri.empty()) {
-      return NULL;
+      return nullptr;
     }
     if (uri.find(kProto) != 0) {
       // uri doesn't start with hdfs:// -> use default:0, which is special
@@ -215,10 +245,10 @@ static const Status notsup;
 class HdfsEnv : public Env {
 
  public:
-  HdfsEnv(const std::string& fsname) {
+  explicit HdfsEnv(const std::string& fsname) {
     fprintf(stderr, "You have not build rocksdb with HDFS support\n");
     fprintf(stderr, "Please see hdfs/README for details\n");
-    throw new std::exception();
+    abort();
   }
 
   virtual ~HdfsEnv() {
@@ -226,76 +256,118 @@ class HdfsEnv : public Env {
 
   virtual Status NewSequentialFile(const std::string& fname,
                                    unique_ptr<SequentialFile>* result,
-                                   const EnvOptions& options);
+                                   const EnvOptions& options) override;
 
   virtual Status NewRandomAccessFile(const std::string& fname,
                                      unique_ptr<RandomAccessFile>* result,
-                                     const EnvOptions& options) {
+                                     const EnvOptions& options) override {
     return notsup;
   }
 
   virtual Status NewWritableFile(const std::string& fname,
                                  unique_ptr<WritableFile>* result,
-                                 const EnvOptions& options) {
+                                 const EnvOptions& options) override {
     return notsup;
   }
 
-  virtual Status NewRandomRWFile(const std::string& fname,
-                                 unique_ptr<RandomRWFile>* result,
-                                 const EnvOptions& options) {
+  virtual Status NewDirectory(const std::string& name,
+                              unique_ptr<Directory>* result) override {
     return notsup;
   }
 
-  virtual bool FileExists(const std::string& fname){return false;}
+  virtual Status FileExists(const std::string& fname) override {
+    return notsup;
+  }
 
   virtual Status GetChildren(const std::string& path,
-                             std::vector<std::string>* result){return notsup;}
-
-  virtual Status DeleteFile(const std::string& fname){return notsup;}
-
-  virtual Status CreateDir(const std::string& name){return notsup;}
-
-  virtual Status CreateDirIfMissing(const std::string& name){return notsup;}
-
-  virtual Status DeleteDir(const std::string& name){return notsup;}
-
-  virtual Status GetFileSize(const std::string& fname, uint64_t* size){return notsup;}
-
-  virtual Status GetFileModificationTime(const std::string& fname,
-                                         uint64_t* time) {
+                             std::vector<std::string>* result) override {
     return notsup;
   }
 
-  virtual Status RenameFile(const std::string& src, const std::string& target){return notsup;}
+  virtual Status DeleteFile(const std::string& fname) override {
+    return notsup;
+  }
 
-  virtual Status LockFile(const std::string& fname, FileLock** lock){return notsup;}
+  virtual Status CreateDir(const std::string& name) override { return notsup; }
 
-  virtual Status UnlockFile(FileLock* lock){return notsup;}
+  virtual Status CreateDirIfMissing(const std::string& name) override {
+    return notsup;
+  }
+
+  virtual Status DeleteDir(const std::string& name) override { return notsup; }
+
+  virtual Status GetFileSize(const std::string& fname,
+                             uint64_t* size) override {
+    return notsup;
+  }
+
+  virtual Status GetFileModificationTime(const std::string& fname,
+                                         uint64_t* time) override {
+    return notsup;
+  }
+
+  virtual Status RenameFile(const std::string& src,
+                            const std::string& target) override {
+    return notsup;
+  }
+
+  virtual Status LinkFile(const std::string& src,
+                          const std::string& target) override {
+    return notsup;
+  }
+
+  virtual Status LockFile(const std::string& fname, FileLock** lock) override {
+    return notsup;
+  }
+
+  virtual Status UnlockFile(FileLock* lock) override { return notsup; }
 
   virtual Status NewLogger(const std::string& fname,
-                           shared_ptr<Logger>* result){return notsup;}
+                           shared_ptr<Logger>* result) override {
+    return notsup;
+  }
 
   virtual void Schedule(void (*function)(void* arg), void* arg,
-                        Priority pri = LOW) {}
+                        Priority pri = LOW, void* tag = nullptr,
+                        void (*unschedFunction)(void* arg) = 0) override {}
 
-  virtual void StartThread(void (*function)(void* arg), void* arg) {}
+  virtual int UnSchedule(void* tag, Priority pri) override { return 0; }
 
-  virtual Status GetTestDirectory(std::string* path) {return notsup;}
+  virtual void StartThread(void (*function)(void* arg), void* arg) override {}
 
-  virtual uint64_t NowMicros() {return 0;}
+  virtual void WaitForJoin() override {}
 
-  virtual void SleepForMicroseconds(int micros) {}
+  virtual unsigned int GetThreadPoolQueueLen(
+      Priority pri = LOW) const override {
+    return 0;
+  }
 
-  virtual Status GetHostName(char* name, uint64_t len) {return notsup;}
+  virtual Status GetTestDirectory(std::string* path) override { return notsup; }
 
-  virtual Status GetCurrentTime(int64_t* unix_time) {return notsup;}
+  virtual uint64_t NowMicros() override { return 0; }
+
+  virtual void SleepForMicroseconds(int micros) override {}
+
+  virtual Status GetHostName(char* name, uint64_t len) override {
+    return notsup;
+  }
+
+  virtual Status GetCurrentTime(int64_t* unix_time) override { return notsup; }
 
   virtual Status GetAbsolutePath(const std::string& db_path,
-      std::string* outputpath) {return notsup;}
+                                 std::string* outputpath) override {
+    return notsup;
+  }
 
-  virtual void SetBackgroundThreads(int number, Priority pri = LOW) {}
+  virtual void SetBackgroundThreads(int number, Priority pri = LOW) override {}
+  virtual int GetBackgroundThreads(Priority pri = LOW) override { return 0; }
+  virtual void IncBackgroundThreadsIfNeeded(int number, Priority pri) override {
+  }
+  virtual std::string TimeToString(uint64_t number) override { return ""; }
 
-  virtual std::string TimeToString(uint64_t number) { return "";}
+  virtual uint64_t GetThreadID() const override {
+    return 0;
+  }
 };
 }
 

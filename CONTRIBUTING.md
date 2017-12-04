@@ -8,9 +8,7 @@ open source project, you're good to go. If you are submitting a pull
 request for the first time, just let us know that you have completed
 the CLA and we can cross-check with your GitHub username.
 
-Complete your CLA here: <https://developers.facebook.com/opensource/cla>
+Complete your CLA here: <https://code.facebook.com/cla>
 
-## License
-
-By contributing to RocksDB, you agree that your contributions will be
-licensed under the [BSD License](LICENSE).
+If you prefer to sign a paper copy, we can send you a PDF.  Send us an 
+e-mail or create a new github issue to request the CLA in PDF format.

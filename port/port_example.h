@@ -1,7 +1,7 @@
-//  Copyright (c) 2013, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -75,35 +75,6 @@ typedef intptr_t OnceType;
 #define LEVELDB_ONCE_INIT 0
 extern void InitOnce(port::OnceType*, void (*initializer)());
 
-// A type that holds a pointer that can be read or written atomically
-// (i.e., without word-tearing.)
-class AtomicPointer {
- private:
-  intptr_t rep_;
- public:
-  // Initialize to arbitrary value
-  AtomicPointer();
-
-  // Initialize to hold v
-  explicit AtomicPointer(void* v) : rep_(v) { }
-
-  // Read and return the stored pointer with the guarantee that no
-  // later memory access (read or write) by this thread can be
-  // reordered ahead of this read.
-  void* Acquire_Load() const;
-
-  // Set v as the stored pointer with the guarantee that no earlier
-  // memory access (read or write) by this thread can be reordered
-  // after this store.
-  void Release_Store(void* v);
-
-  // Read the stored pointer with no ordering guarantees.
-  void* NoBarrier_Load() const;
-
-  // Set va as the stored pointer with no ordering guarantees.
-  void NoBarrier_Store(void* v);
-};
-
 // ------------------ Compression -------------------
 
 // Store the snappy compression of "input[0,input_length-1]" in *output.
@@ -126,13 +97,6 @@ extern bool Snappy_GetUncompressedLength(const char* input, size_t length,
 // Snappy_GetUncompressedLength.
 extern bool Snappy_Uncompress(const char* input_data, size_t input_length,
                               char* output);
-
-// ------------------ Miscellaneous -------------------
-
-// If heap profiling is not supported, returns false.
-// Else repeatedly calls (*func)(arg, data, n) and then returns true.
-// The concatenation of all "data[0,n-1]" fragments is the heap profile.
-extern bool GetHeapProfile(void (*func)(void*, const char*, int), void* arg);
 
 }  // namespace port
 }  // namespace rocksdb

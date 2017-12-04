@@ -1,16 +1,18 @@
-// Copyright (c) 2013, Facebook, Inc.  All rights reserved.
-// This source code is licensed under the BSD-style license found in the
-// LICENSE file in the root directory of this source tree. An additional grant
-// of patent rights can be found in the PATENTS file in the same directory.
+// Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 
 #pragma once
 
 #include <string>
+#include "rocksdb/table.h"
 
 namespace rocksdb {
 
 class Slice;
 class BlockBuilder;
+struct Options;
 
 // FlushBlockPolicy provides a configurable way to determine when to flush a
 // block in the block based tables,
@@ -36,6 +38,7 @@ class FlushBlockPolicyFactory {
   // Callers must delete the result after any database that is using the
   // result has been closed.
   virtual FlushBlockPolicy* NewFlushBlockPolicy(
+      const BlockBasedTableOptions& table_options,
       const BlockBuilder& data_block_builder) const = 0;
 
   virtual ~FlushBlockPolicyFactory() { }
@@ -43,22 +46,17 @@ class FlushBlockPolicyFactory {
 
 class FlushBlockBySizePolicyFactory : public FlushBlockPolicyFactory {
  public:
-  FlushBlockBySizePolicyFactory(const uint64_t block_size,
-                                const uint64_t block_size_deviation) :
-      block_size_(block_size),
-      block_size_deviation_(block_size_deviation) {
-  }
+  FlushBlockBySizePolicyFactory() {}
 
-  virtual const char* Name() const override {
-    return "FlushBlockBySizePolicyFactory";
-  }
+  const char* Name() const override { return "FlushBlockBySizePolicyFactory"; }
 
-  virtual FlushBlockPolicy* NewFlushBlockPolicy(
+  FlushBlockPolicy* NewFlushBlockPolicy(
+      const BlockBasedTableOptions& table_options,
       const BlockBuilder& data_block_builder) const override;
 
- private:
-  const uint64_t block_size_;
-  const uint64_t block_size_deviation_;
+  static FlushBlockPolicy* NewFlushBlockPolicy(
+      const uint64_t size, const int deviation,
+      const BlockBuilder& data_block_builder);
 };
 
 }  // rocksdb
